@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 import boto3
 import argparse
+from datetime import datetime,timedelta,timezone
 
+def terminate_instances(instance_list):
+    eclient = boto3.client('ec2', region_name=awsRegion)
+    waiter = eclient.get_waiter('instance_terminated')
+    ec2 = boto3.resource('ec2', region_name=awsRegion)
+    ec2.instances.filter(InstanceIds = instance_list).terminate()
+    waiter.wait(InstanceIds = instance_list)
+
+# Get all running spot instances with matching tagname that were launched atleast an hour ago.
 def get_instance_details():
     spot_instance_list = []
     ec2 = boto3.resource('ec2', region_name=awsRegion)
@@ -14,92 +23,59 @@ def get_instance_details():
         ]
     )
     for instance in instances:
-        spot_instance_list.append(instance.instance_id)
+        if ((datetime.now(timezone.utc) - instance.launch_time).seconds//3600) > 1:
+            spot_instance_list.append(instance.instance_id)
     return spot_instance_list
 
-def get_alarm_details(nameFilter):
-    alarm_list = []
-    cw = boto3.client('cloudwatch', region_name=awsRegion)
-    paginator = cw.get_paginator('describe_alarms')
-    for response in paginator.paginate():
-        for alarm in response['MetricAlarms']:
-            if nameFilter in alarm['AlarmName']:
-                alarm_instance = {
-                    'AlarmName': alarm['AlarmName'],
-                    'InstanceId': alarm['Dimensions'][0]['Value']
-                }
-                alarm_list.append(alarm_instance)
-    return alarm_list
-
-def create_cloudwatch_alarm(id):
-    cw = boto3.client('cloudwatch', region_name=awsRegion)
-    response = cw.put_metric_alarm(
-        AlarmName=alarmNamePattern + ' ' + str(id),
-        ComparisonOperator='LessThanThreshold',
-        EvaluationPeriods=12,
-        MetricName='CPUUtilization',
+def get_metric_statistics(id,startTime,endTime):
+    statistic_list = []
+    client = boto3.client('cloudwatch', region_name=awsRegion)
+    response = client.get_metric_statistics(
         Namespace='AWS/EC2',
-        Period=300,
-        Statistic='Average',
-        Threshold=cpuThreshold,
-        AlarmActions=[
-            'arn:aws:swf:' + awsRegion + ':' + accountId + ':action/actions/AWS_EC2.InstanceId.Terminate/1.0'
-        ],
-        AlarmDescription='Terminate when spot cpu utilization drops below ' + str(cpuThreshold) + '% for ' + str(id),
+        MetricName='CPUUtilization',
         Dimensions=[
             {
-              'Name': 'InstanceId',
-              'Value': id
+                'Name': 'InstanceId',
+                'Value': id
             },
         ],
-        Unit='Percent'
+        StartTime=startTime,
+        EndTime=endTime,
+        Period=300,
+        Statistics=['Average']
     )
-    return response
+    for data in response['Datapoints']:
+        statistic_list.append(data)
+    return statistic_list
 
-def delete_unused_alarms(nameFilter):
-    cw = boto3.client('cloudwatch', region_name=awsRegion)
-    for alarm in get_alarm_details(nameFilter):
-        if alarm['InstanceId'] not in get_instance_details():
-            print(alarm['InstanceId'] + ' is not running.So removing the alarm ' + alarm['AlarmName'])
-            cw.delete_alarms(
-                AlarmNames=[alarm['AlarmName']]
-            )
-        else:
-            print(alarm['InstanceId'] + ' is running. So not removing the alarm ' + alarm['AlarmName'])
 
+def threshold_check(stats_list,cpuThreshold):
+    for stat in stats_list:
+        if stat['Average'] > cpuThreshold:
+            return False
+    return True
 
 
 # Vars Decalaration/Initialization
+startTime=(datetime.utcnow() - timedelta(hours=1)).isoformat()
+endTime=datetime.utcnow().isoformat()
 parser = argparse.ArgumentParser()
 parser.add_argument(dest='awsRegion')
-parser.add_argument(dest='alarmNamePattern')
 parser.add_argument(dest='instanceTagName')
-parser.add_argument(dest='accountId')
 parser.add_argument(dest='cpuThreshold')
 args = parser.parse_args()
 awsRegion=args.awsRegion
-alarmNamePattern=args.alarmNamePattern
 instanceTagName=args.instanceTagName
-accountId=args.accountId
 cpuThreshold=int(args.cpuThreshold)
 
 
-# Print all alarms before the script runs
-print("Pre Run")
-for alarm in get_alarm_details(alarmNamePattern):
-    print(alarm)
-print("------------------------------------------------")
+instance_to_terminate = []
+for instance in get_instance_details():
+    # print(instance)
+    stats_list = get_metric_statistics(instance,startTime,endTime)
+    if threshold_check(stats_list,cpuThreshold):
+        instance_to_terminate.append(instance)
 
-# Delete unused alarms
-delete_unused_alarms(alarmNamePattern)
-
-# Create alarms for spot instances
-for i in get_instance_details():
-    create_cloudwatch_alarm(i)
-
-
-# Print all alarms after the script runs
-print("Post Run")
-for alarm in get_alarm_details(alarmNamePattern):
-    print(alarm)
-print("------------------------------------------------")
+print('Total spot instances for ' + instanceTagName + ' is ' + str(len(get_instance_details())))
+print('These instances will be terminated ' + str(instance_to_terminate))
+terminate_instances(instance_to_terminate)

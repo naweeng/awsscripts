@@ -7,7 +7,7 @@ def terminate_instances(instance_list):
     eclient = boto3.client('ec2', region_name=awsRegion)
     waiter = eclient.get_waiter('instance_terminated')
     ec2 = boto3.resource('ec2', region_name=awsRegion)
-    ec2.instances.filter(Filters=[{'Name': 'instance-id', 'Values': instance_list}]).terminate()
+    ec2.instances.filter(Filters=[{'Name': 'instance-id', 'Values': instance_list},{'Name': 'instance-lifecycle','Values': ['spot']}]).terminate()
     # waiter.wait(InstanceIds = instance_list)
 
 # Get all running spot instances with matching tagname that were launched atleast an hour ago.
@@ -77,7 +77,7 @@ for instance in get_instance_details():
         instance_to_terminate.append(instance)
 
 print('Total spot instances for ' + instanceTagName + ' is ' + str(len(get_instance_details())))
-if len(instance_to_terminate) > 1:
+if len(instance_to_terminate) > 0:
     print('These instances will be terminated ' + str(instance_to_terminate))
     terminate_instances(instance_to_terminate)
 else:

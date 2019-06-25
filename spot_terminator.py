@@ -77,7 +77,7 @@ for instance in get_instance_details():
         instance_to_terminate.append(instance)
 
 print('Total spot instances for ' + instanceTagName + ' is ' + str(len(get_instance_details())))
-if len(instance_to_terminate) > 1:
+if len(instance_to_terminate) > 0:
     print('These instances will be terminated ' + str(instance_to_terminate))
     terminate_instances(instance_to_terminate)
 else:

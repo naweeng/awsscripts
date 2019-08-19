@@ -18,7 +18,7 @@ def get_instance_details():
     instances = ec2.instances.filter(
         Filters=[
             {'Name': 'instance-state-name', 'Values': ['running']},
-            {'Name': 'tag:Name', 'Values': [instanceTagName]},
+            {'Name': 'tag:Name', 'Values': instanceTagNames},
             {'Name': 'instance-lifecycle', 'Values': ['spot']}
         ]
     )
@@ -61,12 +61,17 @@ startTime=(datetime.utcnow() - timedelta(hours=1)).isoformat()
 endTime=datetime.utcnow().isoformat()
 parser = argparse.ArgumentParser()
 parser.add_argument(dest='awsRegion')
-parser.add_argument(dest='instanceTagName')
-parser.add_argument(dest='cpuThreshold')
+parser.add_argument(type=int, dest='cpuThreshold')
+parser.add_argument("--instanceTagNames", nargs="*", type=str, default=[])
 args = parser.parse_args()
 awsRegion=args.awsRegion
-instanceTagName=args.instanceTagName
-cpuThreshold=int(args.cpuThreshold)
+cpuThreshold=args.cpuThreshold
+instanceTagNames=args.instanceTagNames
+
+
+
+print(instanceTagNames,type(instanceTagNames))
+print(cpuThreshold,type(cpuThreshold))
 
 
 instance_to_terminate = []
@@ -76,9 +81,9 @@ for instance in get_instance_details():
     if threshold_check(stats_list,cpuThreshold):
         instance_to_terminate.append(instance)
 
-print('Total spot instances for ' + instanceTagName + ' is ' + str(len(get_instance_details())))
+print('Total spot instances for ' + str(instanceTagNames) + ' is ' + str(len(get_instance_details())))
 if len(instance_to_terminate) > 0:
     print('These instances will be terminated ' + str(instance_to_terminate))
-    terminate_instances(instance_to_terminate)
+    # terminate_instances(instance_to_terminate)
 else:
     print('Nothing to terminate right now.')
